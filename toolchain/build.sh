@@ -29,13 +29,14 @@ fetch() {
     git clone --depth 1 -b "$SWIFT_SCHEME" https://github.com/swiftlang/swift.git "$SRC/swift"
   fi
   if [ ! -d "$SRC/llvm-project" ]; then
-    # Shallow-clone only the repositories we need (llvm-project, cmark, swift-syntax, swift-driver, string-processing)
+    # Shallow-clone only the repositories we need (llvm-project, cmark, swift-syntax, swift-driver, string-processing,
+    # and swift-corelibs-libdispatch, which the Linux host stdlib needs)
     local skip=()
     for r in swift-llvm-bindings llbuild swift-build swift-toolchain-sqlite swift-tools-protocols \
              swift-tools-support-core swiftpm swift-argument-parser swift-atomics swift-collections \
              swift-crypto swift-certificates swift-asn1 swift-async-algorithms swift-log swift-numerics \
              swift-system swift-stress-tester swift-testing swift-corelibs-xctest swift-corelibs-foundation \
-             swift-foundation-icu swift-foundation swift-corelibs-libdispatch swift-corelibs-blocksruntime \
+             swift-foundation-icu swift-foundation swift-corelibs-blocksruntime \
              swift-integration-tests swift-xcode-playground-support ninja cmake indexstore-db sourcekit-lsp \
              swift-format swift-installer-scripts swift-docc swift-lmdb swift-docc-render-artifact \
              swift-docc-symbolkit swift-markdown swift-nio swift-sdk-generator wasi-libc wasmkit curl \
@@ -44,7 +45,9 @@ fetch() {
     done
     (cd "$SRC" && ./swift/utils/update-checkout --clone --scheme "$SWIFT_SCHEME" --skip-history "${skip[@]}") || true
   fi
-  for repo in llvm-project swift swift-driver; do
+  local required="llvm-project swift swift-driver"
+  [ "$HOST_OS" = "Darwin" ] || required="$required swift-corelibs-libdispatch"
+  for repo in $required; do
     [ -d "$SRC/$repo" ] || { echo "error: $SRC/$repo not found" >&2; exit 1; }
   done
 }
@@ -77,7 +80,9 @@ build() {
     host_args=(--llvm-targets-to-build "AArch64;ARM;X86;Z80" --swift-darwin-supported-archs arm64
                --skip-ios --skip-tvos --skip-watchos --skip-xros)
   else
-    host_args=(--llvm-targets-to-build "AArch64;X86;Z80" --bootstrapping=hosttools)
+    # On Linux the host stdlib (_Concurrency) uses libdispatch, which is not part of the system; build and ship it
+    # like the official toolchains do (usr/lib/swift/linux/libdispatch.so).
+    host_args=(--llvm-targets-to-build "AArch64;X86;Z80" --bootstrapping=hosttools --libdispatch)
   fi
   ./utils/build-script --release --assertions --no-swift-stdlib-assertions \
     --build-subdir sm83 \

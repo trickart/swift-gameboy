@@ -25,6 +25,12 @@ for c in compiler compiler-swift-syntax-lib swift-syntax-lib clang-builtin-heade
     || echo "warning: failed to install Swift component $c"
 done
 
+# Linux: libdispatch (libdispatch.so, libBlocksRuntime.so, Dispatch module) that the host stdlib links against
+if [ "$HOST_OS" != "Darwin" ]; then
+  cmake --install "$BUILD/libdispatch-$HOST_SUFFIX" --prefix "$PREFIX" > /dev/null \
+    || echo "warning: failed to install libdispatch (build.sh passes --libdispatch on Linux)"
+fi
+
 # swift-driver (new driver): swiftc/swift pick it up automatically when swift-driver sits in the same directory.
 # Required for SwiftPM's swift build --swift-sdk. Without it, the legacy (C++) driver is used.
 DRIVER_BUILD=$BUILD/swift-driver-$HOST_SUFFIX/release

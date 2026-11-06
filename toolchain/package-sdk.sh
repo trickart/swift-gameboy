@@ -73,6 +73,18 @@ cmd_toolchain() {
     cp -a "$inc" "$usr/$rel"
   done
   rm -rf "$usr/lib/swift/host/plugins"   # macro plugins are not used for Embedded targets
+
+  # Linux: the executables find their shared libraries via rpath ($ORIGIN/../lib/swift/linux etc.), so everything
+  # they need must be inside the package. Fail early if something is missing instead of shipping a broken bundle.
+  if [ "$(uname -s)" = "Linux" ] && command -v ldd > /dev/null; then
+    local missing=""
+    for f in swift-frontend swift-driver clang-21 lld; do
+      [ -e "$usr/bin/$f" ] || continue
+      missing="$missing$(ldd "$usr/bin/$f" 2>/dev/null | grep 'not found' | sed "s|^|  $f:|")"
+    done
+    [ -z "$missing" ] || die "shared libraries missing from the package:
+$missing"
+  fi
   cp "$tc/Info.plist" "$work/toolchain/" 2>/dev/null || true
 
   # Strip executables and shared libraries (roughly halves the size). Ad-hoc signatures on macOS stay valid.
