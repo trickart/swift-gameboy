@@ -30,7 +30,7 @@ fetch() {
   fi
   if [ ! -d "$SRC/llvm-project" ]; then
     # Shallow-clone only the repositories we need (llvm-project, cmark, swift-syntax, swift-driver, string-processing,
-    # and swift-corelibs-libdispatch, which the Linux host stdlib needs)
+    # and swift-corelibs-libdispatch, which the Swift build compiles for the Linux host stdlib)
     local skip=()
     for r in swift-llvm-bindings llbuild swift-build swift-toolchain-sqlite swift-tools-protocols \
              swift-tools-support-core swiftpm swift-argument-parser swift-atomics swift-collections \
@@ -80,9 +80,17 @@ build() {
     host_args=(--llvm-targets-to-build "AArch64;ARM;X86;Z80" --swift-darwin-supported-archs arm64
                --skip-ios --skip-tvos --skip-watchos --skip-xros)
   else
-    # On Linux the host stdlib (_Concurrency) uses libdispatch, which is not part of the system; build and ship it
-    # like the official toolchains do (usr/lib/swift/linux/libdispatch.so).
-    host_args=(--llvm-targets-to-build "AArch64;X86;Z80" --bootstrapping=hosttools --libdispatch)
+    # GNU ld (bfd) cannot link Swift shared libraries ("relocation ... against protected symbol can not be used
+    # when making a shared object"), and the host-side Swift libraries (swift-syntax) only honor LLVM_USE_LINKER.
+    # Prefer lld (shipped with the Swift toolchain), otherwise gold (binutils).
+    local linker
+    if command -v ld.lld > /dev/null; then linker=lld
+    elif command -v ld.gold > /dev/null; then linker=gold
+    else echo "error: neither ld.lld nor ld.gold found; install lld or binutils" >&2; exit 1
+    fi
+    echo "Using linker: $linker"
+    host_args=(--llvm-targets-to-build "AArch64;X86;Z80" --bootstrapping=hosttools
+               --extra-cmake-options="-DLLVM_USE_LINKER=$linker")
   fi
   ./utils/build-script --release --assertions --no-swift-stdlib-assertions \
     --build-subdir sm83 \

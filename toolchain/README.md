@@ -8,7 +8,7 @@ tag `llvmz80-23.1.3-r1`.
 
 | File | Role |
 |---|---|
-| `build.sh` | Fetch sources (`build/src`) → apply `patches/` → build-script → swift-driver → `install-toolchain.sh`. Needs macOS arm64 and Xcode 27; takes 1.5–3 hours and about 60GB of disk |
+| `build.sh` | Fetch sources (`build/src`) → apply `patches/` → build-script → swift-driver → `install-toolchain.sh`. Needs macOS arm64 with Xcode 27, or Linux with a Swift 6.4 toolchain and lld or gold; takes 1.5–3 hours and about 60GB of disk |
 | `install-toolchain.sh` | Installs only the required components from `build/sm83/` into `build/swift-sm83.xctoolchain`, then runs `install-gb-runtime.sh` |
 | `install-gb-runtime.sh` | Replaces `usr/lib/sm83/` with the Game Boy runtime (`runtime/gb.ld` → sm83.ld, `runtime/crt0.s` → sm83_crt0.o, `runtime/runtime.c` + `runtime/compiler-rt` → sm83_rt.a). Re-run it on its own after editing `runtime/` |
 | `make-swift-sdk.sh` | Generates `build/gameboy.artifactbundle` and runs `swift sdk install`. The toolset.json contains absolute paths, so re-run it after moving the toolchain |

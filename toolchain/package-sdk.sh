@@ -78,9 +78,9 @@ cmd_toolchain() {
   # they need must be inside the package. Fail early if something is missing instead of shipping a broken bundle.
   if [ "$(uname -s)" = "Linux" ] && command -v ldd > /dev/null; then
     local missing=""
-    for f in swift-frontend swift-driver clang-21 lld; do
-      [ -e "$usr/bin/$f" ] || continue
-      missing="$missing$(ldd "$usr/bin/$f" 2>/dev/null | grep 'not found' | sed "s|^|  $f:|")"
+    for f in "$usr"/bin/swift-frontend "$usr"/bin/swift-driver "$usr"/bin/clang-21 "$usr"/bin/lld "$usr"/lib/swift/linux/*.so; do
+      [ -f "$f" ] || continue
+      missing="$missing$(ldd "$f" 2>/dev/null | grep 'not found' | sed "s|^|  $(basename "$f"):|")"
     done
     [ -z "$missing" ] || die "shared libraries missing from the package:
 $missing"

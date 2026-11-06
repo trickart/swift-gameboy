@@ -25,10 +25,17 @@ for c in compiler compiler-swift-syntax-lib swift-syntax-lib clang-builtin-heade
     || echo "warning: failed to install Swift component $c"
 done
 
-# Linux: libdispatch (libdispatch.so, libBlocksRuntime.so, Dispatch module) that the host stdlib links against
+# Linux: the host stdlib (libswift_Concurrency.so) links against libdispatch, which the Swift build compiles as an
+# external project and copies into its lib/swift/linux but does not install. Ship it next to the stdlib.
 if [ "$HOST_OS" != "Darwin" ]; then
-  cmake --install "$BUILD/libdispatch-$HOST_SUFFIX" --prefix "$PREFIX" > /dev/null \
-    || echo "warning: failed to install libdispatch (build.sh passes --libdispatch on Linux)"
+  for lib in libdispatch.so libBlocksRuntime.so; do
+    src=$(find "$BUILD/swift-$HOST_SUFFIX/lib/swift/linux" -maxdepth 2 -name "$lib" 2>/dev/null | head -1)
+    if [ -n "$src" ]; then
+      cp "$src" "$PREFIX/lib/swift/linux/"
+    else
+      echo "warning: $lib not found in the Swift build directory"
+    fi
+  done
 fi
 
 # swift-driver (new driver): swiftc/swift pick it up automatically when swift-driver sits in the same directory.
