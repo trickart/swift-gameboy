@@ -1,0 +1,12 @@
+# SwiftPM
+.build/
+# Toolchain sources, build directories and generated artifacts (created by toolchain/build.sh and make-swift-sdk.sh)
+build/
+# Personal notes
+notes/
+.vscode/
+# Generated files
+*.gb
+*.elf
+__pycache__/
+.DS_Store

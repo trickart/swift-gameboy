@@ -1,0 +1,79 @@
+diff --git a/Package.resolved b/Package.resolved
+index 659f777..fa06639 100644
+--- a/Package.resolved
++++ b/Package.resolved
+@@ -1,4 +1,5 @@
+ {
++  "originHash" : "9cef44dfbe03b39d20f31bf0609ffe6b44351ac5ef012d72ae7e005ad0770a7b",
+   "pins" : [
+     {
+       "identity" : "swift-argument-parser",
+@@ -14,8 +15,8 @@
+       "kind" : "remoteSourceControl",
+       "location" : "https://github.com/swiftlang/swift-llbuild.git",
+       "state" : {
+-        "branch" : "main",
+-        "revision" : "e38525ae3519021f014ad91e7bf86e7ae86044f5"
++        "branch" : "release/6.4.x",
++        "revision" : "ab6421207b9e4971c94e97c5832a3d8a4cae9092"
+       }
+     },
+     {
+@@ -32,10 +33,10 @@
+       "kind" : "remoteSourceControl",
+       "location" : "https://github.com/swiftlang/swift-tools-support-core.git",
+       "state" : {
+-        "branch" : "main",
+-        "revision" : "c3c31067a47b15b085d165f4cf7ef8aa8802d6e8"
++        "branch" : "release/6.4.x",
++        "revision" : "0496a15648b286a259356c534f3f26a57bbf48a5"
+       }
+     }
+   ],
+-  "version" : 2
++  "version" : 3
+ }
+diff --git a/Sources/SwiftDriver/Utilities/Triple.swift b/Sources/SwiftDriver/Utilities/Triple.swift
+index 2bd3a62..2990dae 100644
+--- a/Sources/SwiftDriver/Utilities/Triple.swift
++++ b/Sources/SwiftDriver/Utilities/Triple.swift
+@@ -436,6 +436,10 @@ extension Triple {
+     case arc
+     /// AVR: Atmel AVR microcontroller
+     case avr
++    /// Z80: Zilog Z80 and variants
++    case z80
++    /// SM83: Sharp SM83 (Game Boy CPU)
++    case sm83
+     /// eBPF or extended BPF or 64-bit BPF (little endian)
+     case bpfel
+     /// eBPF or extended BPF or 64-bit BPF (big endian)
+@@ -569,6 +573,10 @@ extension Triple {
+         return .thumbeb
+       case "avr":
+         return .avr
++      case "z80":
++        return .z80
++      case "sm83":
++        return .sm83
+       case "m68k":
+         return .m68k
+       case "msp430":
+@@ -824,7 +832,7 @@ extension Triple {
+     /// The width in bits of pointers on this architecture.
+     var pointerBitWidth: Int {
+       switch self {
+-      case .avr, .msp430:
++      case .avr, .msp430, .z80, .sm83:
+         return 16
+ 
+       case .arc, .arm, .armeb, .hexagon, .le32, .mips, .mipsel, .nvptx,
+@@ -1406,6 +1414,8 @@ extension Triple {
+         case .amdil64: fallthrough
+         case .armeb: fallthrough
+         case .avr: fallthrough
++        case .z80: fallthrough
++        case .sm83: fallthrough
+         case .bpfeb: fallthrough
+         case .bpfel: fallthrough
+         case .hexagon: fallthrough

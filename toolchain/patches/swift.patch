@@ -1,0 +1,275 @@
+diff --git a/cmake/modules/SwiftSetIfArchBitness.cmake b/cmake/modules/SwiftSetIfArchBitness.cmake
+index a4b54574e6..08bdf20f6c 100644
+--- a/cmake/modules/SwiftSetIfArchBitness.cmake
++++ b/cmake/modules/SwiftSetIfArchBitness.cmake
+@@ -6,7 +6,9 @@ function(set_if_arch_bitness var_name)
+       "" # multi-value args
+       ${ARGN})
+ 
+-  if("${SIA_ARCH}" STREQUAL "avr")
++  if("${SIA_ARCH}" STREQUAL "avr" OR
++     "${SIA_ARCH}" STREQUAL "sm83" OR
++     "${SIA_ARCH}" STREQUAL "z80")
+       set("${var_name}" "${SIA_CASE_16_BIT}" PARENT_SCOPE)
+   elseif("${SIA_ARCH}" STREQUAL "i386" OR
+      "${SIA_ARCH}" STREQUAL "i686" OR
+diff --git a/include/swift/AST/IRGenOptions.h b/include/swift/AST/IRGenOptions.h
+index 241e8a4a5c..50e4e7ab48 100644
+--- a/include/swift/AST/IRGenOptions.h
++++ b/include/swift/AST/IRGenOptions.h
+@@ -377,6 +377,9 @@ public:
+   /// Emit functions to separate sections.
+   unsigned FunctionSections : 1;
+ 
++  /// Emit each global into a separate section.
++  unsigned DataSections : 1;
++
+   /// The maximum number of bytes used on a stack frame for stack promotion
+   /// (includes alloc_stack allocations).
+   unsigned StackPromotionSizeLimit = 1024;
+@@ -662,6 +665,7 @@ public:
+         DisableLLVMOptzns(false), DisableSwiftSpecificLLVMOptzns(false),
+         Playground(false), EmitStackPromotionChecks(false),
+         UseSingleModuleLLVMEmission(false), FunctionSections(false),
++        DataSections(false),
+         PrintInlineTree(false), AlwaysCompile(false),
+         EmbedMode(IRGenEmbedMode::None), LLVMLTOKind(IRGenLLVMLTOKind::None),
+         SwiftAsyncFramePointer(SwiftAsyncFramePointerKind::Auto),
+diff --git a/include/swift/Option/FrontendOptions.td b/include/swift/Option/FrontendOptions.td
+index 1ef13d03d7..de0d0911ed 100644
+--- a/include/swift/Option/FrontendOptions.td
++++ b/include/swift/Option/FrontendOptions.td
+@@ -713,6 +713,10 @@ def function_sections: Flag<["-"], "function-sections">,
+   Flags<[FrontendOption, NoInteractiveOption]>,
+   HelpText<"Emit functions to separate sections.">;
+ 
++def data_sections: Flag<["-"], "data-sections">,
++  Flags<[FrontendOption, NoInteractiveOption]>,
++  HelpText<"Emit each global into its own section (for --gc-sections)">;
++
+ def enable_single_module_llvm_emission: Flag<["-"], "enable-single-module-llvm-emission">,
+   Flags<[FrontendOption, NoInteractiveOption]>,
+   HelpText<"Emit LLVM IR into a single LLVM module in multithreaded mode.">;
+diff --git a/lib/Basic/LangOptions.cpp b/lib/Basic/LangOptions.cpp
+index ac7f9bdb22..06b1611e4c 100644
+--- a/lib/Basic/LangOptions.cpp
++++ b/lib/Basic/LangOptions.cpp
+@@ -104,7 +104,8 @@ static const SupportedConditionalValue SupportedConditionalCompilationArches[] =
+   "wasm32",
+   "riscv32",
+   "riscv64",
+-  "avr"
++  "avr",
++  "sm83"
+ };
+ 
+ static const SupportedConditionalValue SupportedConditionalCompilationEndianness[] = {
+@@ -639,6 +640,9 @@ std::pair<bool, bool> LangOptions::setTarget(llvm::Triple triple) {
+   case llvm::Triple::ArchType::avr:
+     addPlatformConditionValue(PlatformConditionKind::Arch, "avr");
+     break;
++  case llvm::Triple::ArchType::sm83:
++    addPlatformConditionValue(PlatformConditionKind::Arch, "sm83");
++    break;
+   default:
+     UnsupportedArch = true;
+ 
+diff --git a/lib/Frontend/CompilerInvocation.cpp b/lib/Frontend/CompilerInvocation.cpp
+index 933165c9c0..3b9ceb0268 100644
+--- a/lib/Frontend/CompilerInvocation.cpp
++++ b/lib/Frontend/CompilerInvocation.cpp
+@@ -3284,6 +3284,12 @@ static bool ParseSILArgs(SILOptions &Opts, ArgList &Args,
+   Opts.EnableMoveInoutStackProtection = Args.hasArg(
+       OPT_enable_move_inout_stack_protector, OPT_disable_stack_protector,
+       Opts.EnableMoveInoutStackProtection);
++  // The Z80/SM83 backend selects through GlobalISel only and has no stack
++  // guard lowering, and its bare-metal runtime has no __stack_chk_guard.
++  if (LangOpts.Target.isZ80Family()) {
++    Opts.EnableStackProtection = false;
++    Opts.EnableMoveInoutStackProtection = false;
++  }
+   Opts.EnableImportPtrauthFieldFunctionPointers =
+       !Args.hasArg(OPT_disable_import_ptrauth_field_function_pointers);
+   Opts.EnableLifetimeDependenceDiagnostics =
+@@ -3711,6 +3717,7 @@ static bool ParseIRGenArgs(IRGenOptions &Opts, ArgList &Args,
+     Opts.TrapFuncName = Args.getLastArgValue(OPT_trap_function).str();
+ 
+   Opts.FunctionSections = Args.hasArg(OPT_function_sections);
++  Opts.DataSections = Args.hasArg(OPT_data_sections);
+ 
+   Opts.VerboseAsm = Args.hasFlag(OPT_verbose_asm, OPT_no_verbose_asm,
+                                  /*default*/ true);
+diff --git a/lib/IRGen/ExtraInhabitants.cpp b/lib/IRGen/ExtraInhabitants.cpp
+index 6d40a1b51a..bbfaa9022a 100644
+--- a/lib/IRGen/ExtraInhabitants.cpp
++++ b/lib/IRGen/ExtraInhabitants.cpp
+@@ -165,7 +165,8 @@ llvm::Value *PointerInfo::getExtraInhabitantIndex(IRGenFunction &IGF,
+ 
+     // Truncate down to i32 if necessary.
+     if (index->getType() != IGF.IGM.Int32Ty) {
+-      index = IGF.Builder.CreateTrunc(index, IGF.IGM.Int32Ty);
++      // Pointers can be narrower than 32 bits (16-bit targets).
++      index = IGF.Builder.CreateZExtOrTrunc(index, IGF.IGM.Int32Ty);
+     }
+ 
+     phiValues.push_back({IGF.Builder.GetInsertBlock(), index});
+@@ -195,7 +196,8 @@ void PointerInfo::storeExtraInhabitant(IRGenFunction &IGF,
+                                        llvm::Value *index,
+                                        Address dest) const {
+   if (index->getType() != IGF.IGM.SizeTy) {
+-    index = IGF.Builder.CreateZExt(index, IGF.IGM.SizeTy);
++    // Pointers can be narrower than 32 bits (16-bit targets).
++    index = IGF.Builder.CreateZExtOrTrunc(index, IGF.IGM.SizeTy);
+   }
+ 
+   if (Nullable) {
+diff --git a/lib/IRGen/GenCall.cpp b/lib/IRGen/GenCall.cpp
+index 60b9029573..803fd27fb8 100644
+--- a/lib/IRGen/GenCall.cpp
++++ b/lib/IRGen/GenCall.cpp
+@@ -2837,7 +2837,7 @@ public:
+       llvm::Value *bufferSize32, *mallocTypeId;
+       std::tie(calleeFunction, bufferSize32, mallocTypeId) =
+           getCoroFunctionValues(IGF, CurCallee.getFunctionPointer());
+-      auto *bufferSize = IGF.Builder.CreateZExt(bufferSize32, IGF.IGM.SizeTy);
++      auto *bufferSize = IGF.Builder.CreateZExtOrTrunc(bufferSize32, IGF.IGM.SizeTy);
+       coroStaticFrame =
+           emitAllocYieldOnce2CoroutineFrame(IGF, bufferSize, mallocTypeId);
+       // TODO: CoroutineAccessors: Optimize allocator kind (e.g. async callers
+@@ -3194,7 +3194,7 @@ public:
+     std::tie(calleeFunction, dynamicContextSize32) =
+         getAsyncFunctionAndSize(IGF, CurCallee.getFunctionPointer());
+     auto *dynamicContextSize =
+-        IGF.Builder.CreateZExt(dynamicContextSize32, IGF.IGM.SizeTy);
++        IGF.Builder.CreateZExtOrTrunc(dynamicContextSize32, IGF.IGM.SizeTy);
+     if (auto staticSize = dyn_cast<llvm::ConstantInt>(dynamicContextSize)) {
+       staticContextSize = Size(staticSize->getZExtValue());
+       assert(!staticContextSize.isZero());
+diff --git a/lib/IRGen/GenClass.cpp b/lib/IRGen/GenClass.cpp
+index 4a29ff60da..2ee7c16c36 100644
+--- a/lib/IRGen/GenClass.cpp
++++ b/lib/IRGen/GenClass.cpp
+@@ -3054,14 +3054,14 @@ irgen::emitClassResilientInstanceSizeAndAlignMask(IRGenFunction &IGF,
+   slot = IGF.Builder.CreateElementBitCast(slot, IGF.IGM.Int32Ty);
+   llvm::Value *size = IGF.Builder.CreateLoad(slot);
+   if (IGF.IGM.SizeTy != IGF.IGM.Int32Ty)
+-    size = IGF.Builder.CreateZExt(size, IGF.IGM.SizeTy);
++    size = IGF.Builder.CreateZExtOrTrunc(size, IGF.IGM.SizeTy);
+ 
+   slot = IGF.Builder.CreateConstByteArrayGEP(
+       metadataAsBytes,
+       layout.getInstanceAlignMaskOffset());
+   slot = IGF.Builder.CreateElementBitCast(slot, IGF.IGM.Int16Ty);
+   llvm::Value *alignMask = IGF.Builder.CreateLoad(slot);
+-  alignMask = IGF.Builder.CreateZExt(alignMask, IGF.IGM.SizeTy);
++  alignMask = IGF.Builder.CreateZExtOrTrunc(alignMask, IGF.IGM.SizeTy);
+ 
+   return {size, alignMask};
+ }
+diff --git a/lib/IRGen/GenDecl.cpp b/lib/IRGen/GenDecl.cpp
+index ebeda9079e..09118f359b 100644
+--- a/lib/IRGen/GenDecl.cpp
++++ b/lib/IRGen/GenDecl.cpp
+@@ -3201,7 +3201,7 @@ void IRGenModule::createReplaceableProlog(IRGenFunction &IGF, SILFunction *f) {
+     std::tie(calleeFunction, dynamicContextSize32) =
+         getAsyncFunctionAndSize(IGF, asyncFnPtr, std::make_pair(false, true));
+     auto *dynamicContextSize =
+-        Builder.CreateZExt(dynamicContextSize32, IGM.SizeTy);
++        Builder.CreateZExtOrTrunc(dynamicContextSize32, IGM.SizeTy);
+     auto calleeContextBuffer = emitAllocAsyncContext(IGF, dynamicContextSize);
+     auto calleeContext =
+         layout.emitCastTo(IGF, calleeContextBuffer.getAddress());
+diff --git a/lib/IRGen/GenFunc.cpp b/lib/IRGen/GenFunc.cpp
+index 0ef4e16436..4b9af0a6a1 100644
+--- a/lib/IRGen/GenFunc.cpp
++++ b/lib/IRGen/GenFunc.cpp
+@@ -1348,7 +1348,7 @@ public:
+     std::tie(calleeFunction, dynamicContextSize32) =
+         getAsyncFunctionAndSize(subIGF, fnPtr, std::make_pair(true, true));
+     auto *dynamicContextSize =
+-        subIGF.Builder.CreateZExt(dynamicContextSize32, subIGF.IGM.SizeTy);
++        subIGF.Builder.CreateZExtOrTrunc(dynamicContextSize32, subIGF.IGM.SizeTy);
+     calleeContextBuffer =
+         emitAllocAsyncContext(subIGF, dynamicContextSize);
+     context = layout.emitCastTo(subIGF, calleeContextBuffer.getAddress());
+diff --git a/lib/IRGen/IRGen.cpp b/lib/IRGen/IRGen.cpp
+index 64b1869803..414e36603a 100644
+--- a/lib/IRGen/IRGen.cpp
++++ b/lib/IRGen/IRGen.cpp
+@@ -153,6 +153,7 @@ swift::getIRTargetOptions(const IRGenOptions &Opts, ASTContext &Ctx,
+   // on Darwin platforms but not on others.
+   TargetOpts.DebuggerTuning = llvm::DebuggerKind::LLDB;
+   TargetOpts.FunctionSections = Opts.FunctionSections;
++  TargetOpts.DataSections = Opts.DataSections;
+ 
+   // Set option to UseCASBackend if CAS was enabled on the command line.
+   TargetOpts.UseCASBackend = Opts.UseCASBackend;
+diff --git a/stdlib/public/CMakeLists.txt b/stdlib/public/CMakeLists.txt
+index 17cbc9aac6..d5e73330b0 100644
+--- a/stdlib/public/CMakeLists.txt
++++ b/stdlib/public/CMakeLists.txt
+@@ -268,6 +268,12 @@ if(SWIFT_SHOULD_BUILD_EMBEDDED_STDLIB_CROSS_COMPILING)
+         "avr  avr-none-none-elf    avr-none-none-elf"
+       )
+     endif()
++
++    if("Z80" IN_LIST LLVM_TARGETS_TO_BUILD)
++      list(APPEND EMBEDDED_STDLIB_TARGET_TRIPLES
++        "sm83  sm83-none-none-elf    sm83-none-none-elf"
++      )
++    endif()
+   endif()
+ endif()
+ 
+diff --git a/stdlib/public/EmbeddedPlatform/CMakeLists.txt b/stdlib/public/EmbeddedPlatform/CMakeLists.txt
+index aa1c10cf0b..10fca92cb4 100644
+--- a/stdlib/public/EmbeddedPlatform/CMakeLists.txt
++++ b/stdlib/public/EmbeddedPlatform/CMakeLists.txt
+@@ -31,7 +31,7 @@ if(SWIFT_SHOULD_BUILD_EMBEDDED_STDLIB)
+       continue()
+     endif()
+ 
+-    if("${arch}" MATCHES "avr")
++    if("${arch}" MATCHES "avr|sm83|z80")
+       continue()
+     endif()
+ 
+diff --git a/stdlib/public/Synchronization/CMakeLists.txt b/stdlib/public/Synchronization/CMakeLists.txt
+index 69754b9fb0..e16be31be8 100644
+--- a/stdlib/public/Synchronization/CMakeLists.txt
++++ b/stdlib/public/Synchronization/CMakeLists.txt
+@@ -182,7 +182,7 @@ if(SWIFT_SHOULD_BUILD_EMBEDDED_STDLIB)
+     list(GET list 2 triple)
+ 
+     # Disable the Synchronization library on AVR for now.
+-    if("${arch}" MATCHES "avr")
++    if("${arch}" MATCHES "avr|sm83|z80")
+       continue()
+     endif()
+ 
+diff --git a/stdlib/public/stubs/Exclusivity/CMakeLists.txt b/stdlib/public/stubs/Exclusivity/CMakeLists.txt
+index 40f3d32f64..8be9e9c03a 100644
+--- a/stdlib/public/stubs/Exclusivity/CMakeLists.txt
++++ b/stdlib/public/stubs/Exclusivity/CMakeLists.txt
+@@ -14,7 +14,7 @@ if(SWIFT_SHOULD_BUILD_EMBEDDED_STDLIB)
+       continue()
+     endif()
+ 
+-    if("${arch}" MATCHES "avr")
++    if("${arch}" MATCHES "avr|sm83|z80")
+       continue()
+     endif()
+ 
+diff --git a/stdlib/public/stubs/Unicode/CMakeLists.txt b/stdlib/public/stubs/Unicode/CMakeLists.txt
+index e48f1123b6..7eadab393f 100644
+--- a/stdlib/public/stubs/Unicode/CMakeLists.txt
++++ b/stdlib/public/stubs/Unicode/CMakeLists.txt
+@@ -14,7 +14,7 @@ if(SWIFT_SHOULD_BUILD_EMBEDDED_STDLIB)
+       continue()
+     endif()
+ 
+-    if("${arch}" MATCHES "avr")
++    if("${arch}" MATCHES "avr|sm83|z80")
+       continue()
+     endif()
+ 
