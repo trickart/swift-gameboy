@@ -12,7 +12,9 @@ TC="${SWIFT_GB_TOOLCHAIN:-$ROOT/build/swift-sm83.xctoolchain}"
 NAME=gameboy
 TRIPLE=sm83-none-none-elf
 BUNDLE="$ROOT/build/$NAME.artifactbundle"
-VERSION=$(/usr/libexec/PlistBuddy -c 'Print :Version' "$TC/Info.plist" 2>/dev/null || echo 0.0.1)
+VERSION=$(sed -n 's#.*<key>Version</key><string>\(.*\)</string>.*#\1#p' "$TC/Info.plist" 2>/dev/null | head -1)
+VERSION=${VERSION:-0.0.1}
+. "$ROOT/toolchain/sdk-json.sh"
 
 [ -x "$TC/usr/bin/swiftc" ] || { echo "error: $TC/usr/bin/swiftc not found" >&2; exit 1; }
 [ -x "$TC/usr/bin/swift-driver" ] || { echo "error: $TC/usr/bin/swift-driver not found (SwiftPM requires the new driver)" >&2; exit 1; }
@@ -32,44 +34,8 @@ cat > "$BUNDLE/info.json" <<JSON
   }
 }
 JSON
-# Without swiftResourcesPath, SwiftPM passes the SDK directory itself as -resource-dir and the
-# Embedded standard library is not found. Point it at the toolchain's usr/lib/swift explicitly.
-cat > "$BUNDLE/$NAME/swift-sdk.json" <<JSON
-{
-  "schemaVersion": "4.0",
-  "targetTriples": {
-    "$TRIPLE": {
-      "swiftResourcesPath": "$TC/usr/lib/swift",
-      "swiftStaticResourcesPath": "$TC/usr/lib/swift_static",
-      "toolsetPaths": [ "toolset.json" ]
-    }
-  }
-}
-JSON
-# swiftCompiler extraCLIOptions are added to both the compile and the link invocations of swiftc.
-# -Osize comes after the -O/-Onone that SwiftPM adds, so it takes precedence (keeps debug builds within ROM).
-cat > "$BUNDLE/$NAME/toolset.json" <<JSON
-{
-  "schemaVersion": "1.0",
-  "rootPath": "$TC/usr/bin",
-  "swiftCompiler": {
-    "extraCLIOptions": [
-      "-enable-experimental-feature", "Embedded",
-      "-enable-experimental-feature", "Extern",
-      "-wmo",
-      "-Osize",
-      "-Xfrontend", "-disable-stack-protector",
-      "-Xfrontend", "-disable-objc-interop",
-      "-Xfrontend", "-function-sections",
-      "-Xfrontend", "-data-sections",
-      "-Xlinker", "--gc-sections"
-    ]
-  },
-  "cCompiler": {
-    "extraCLIOptions": [ "-Os", "-ffreestanding", "-fno-builtin", "-ffunction-sections", "-fdata-sections" ]
-  }
-}
-JSON
+# swift-sdk.json / toolset.json (shared with package-sdk.sh; absolute paths into the toolchain here)
+write_sdk_json "$BUNDLE/$NAME" "$TC/usr"
 echo "Generated: $BUNDLE"
 if [ "${1:-}" != "--no-install" ]; then
   if swift sdk list 2>/dev/null | grep -qx "$NAME"; then

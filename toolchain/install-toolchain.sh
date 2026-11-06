@@ -3,6 +3,7 @@
 # Usage: install-toolchain.sh [destination .xctoolchain]
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/toolchain/host.sh"
 BUILD=${SWIFT_GB_BUILD_ROOT:-$ROOT/build}/sm83
 DEST=${1:-$ROOT/build/swift-sm83.xctoolchain}
 PREFIX=$DEST/usr
@@ -13,20 +14,20 @@ mkdir -p "$PREFIX"
 # LLVM / clang / lld: install only the tools we need
 for c in clang clang-resource-headers lld llvm-mc llvm-objcopy llvm-nm llvm-ar llvm-objdump \
          llvm-readobj llvm-size llvm-strip llvm-readelf Z80Runtime; do
-  cmake --install "$BUILD/llvm-macosx-arm64" --component "$c" --prefix "$PREFIX" > /dev/null \
+  cmake --install "$BUILD/llvm-$HOST_SUFFIX" --component "$c" --prefix "$PREFIX" > /dev/null \
     || echo "warning: failed to install LLVM component $c"
 done
 
 # Swift: compiler and standard library (including Embedded sm83)
 for c in compiler compiler-swift-syntax-lib swift-syntax-lib clang-builtin-headers autolink-driver \
          libexec stdlib license; do
-  cmake --install "$BUILD/swift-macosx-arm64" --component "$c" --prefix "$PREFIX" > /dev/null \
+  cmake --install "$BUILD/swift-$HOST_SUFFIX" --component "$c" --prefix "$PREFIX" > /dev/null \
     || echo "warning: failed to install Swift component $c"
 done
 
 # swift-driver (new driver): swiftc/swift pick it up automatically when swift-driver sits in the same directory.
 # Required for SwiftPM's swift build --swift-sdk. Without it, the legacy (C++) driver is used.
-DRIVER_BUILD=$BUILD/swift-driver-macosx-arm64/release
+DRIVER_BUILD=$BUILD/swift-driver-$HOST_SUFFIX/release
 if [ -x "$DRIVER_BUILD/swift-driver" ]; then
   cp "$DRIVER_BUILD/swift-driver" "$PREFIX/bin/"
   [ -x "$DRIVER_BUILD/swift-help" ] && cp "$DRIVER_BUILD/swift-help" "$PREFIX/bin/"

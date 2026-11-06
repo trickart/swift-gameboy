@@ -10,3 +10,5 @@ notes/
 *.elf
 __pycache__/
 .DS_Store
+# Distribution tarballs (toolchain/package-sdk.sh)
+dist/

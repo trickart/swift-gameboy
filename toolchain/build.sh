@@ -1,23 +1,27 @@
 #!/bin/bash
-# Build swift-sm83.xctoolchain from source (requires macOS arm64 / Xcode 27 / a Swift 6.4 toolchain).
+# Build swift-sm83.xctoolchain from source.
+# Hosts: macOS arm64 (Xcode 27) or Linux x86_64/aarch64 (a Swift 6.4 toolchain such as the swift:6.4.2 Docker image,
+# plus cmake, ninja, python3 and the usual build dependencies; see .github/workflows/toolchain.yml).
 #
 #   toolchain/build.sh            # fetch -> apply patches -> build -> install into build/swift-sm83.xctoolchain
 #   toolchain/build.sh --no-fetch # skip fetching and patching; rebuild only
 #
-# After build-script, swift-driver (the new driver) is built with the host Swift (xcrun swift build)
+# After build-script, swift-driver (the new driver) is built with the host Swift (swift build)
 # and install-toolchain.sh places it in usr/bin. Required for SwiftPM (swift build --swift-sdk gameboy).
-# Takes roughly 1.5-3 hours and about 60GB of disk.
+# Takes roughly 1.5-3 hours on a 10-core machine and about 60GB of disk.
 # Environment variables:
 #   SWIFT_GB_SRC_ROOT    where sources are checked out (default: <repo>/build/src)
 #   SWIFT_GB_BUILD_ROOT  build directory (default: <repo>/build; build-script uses build/sm83/)
 #   JOBS                 parallel jobs (default: number of CPUs)
+#   SWIFT_USE_SCCACHE=1  let build-script use sccache (must be on PATH)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/toolchain/host.sh"
 SRC="${SWIFT_GB_SRC_ROOT:-$ROOT/build/src}"
 BUILD_ROOT="${SWIFT_GB_BUILD_ROOT:-$ROOT/build}"
 PATCHES="$ROOT/toolchain/patches"
 SWIFT_SCHEME="release/6.4.2"
-JOBS="${JOBS:-$(sysctl -n hw.ncpu)}"
+JOBS="${JOBS:-$HOST_CPUS}"
 
 fetch() {
   mkdir -p "$SRC"
@@ -67,15 +71,21 @@ build() {
   mkdir -p "$BUILD_ROOT"
   cd "$SRC/swift"
   export SWIFT_BUILD_ROOT="$BUILD_ROOT"
+  local host_args=()
+  if [ "$HOST_OS" = "Darwin" ]; then
+    # ARM is needed for the host compiler-rt (libclang_rt.osx.a) that libswiftCore links against
+    host_args=(--llvm-targets-to-build "AArch64;ARM;X86;Z80" --swift-darwin-supported-archs arm64
+               --skip-ios --skip-tvos --skip-watchos --skip-xros)
+  else
+    host_args=(--llvm-targets-to-build "AArch64;X86;Z80" --bootstrapping=hosttools)
+  fi
   ./utils/build-script --release --assertions --no-swift-stdlib-assertions \
     --build-subdir sm83 \
     --jobs "$JOBS" \
     --skip-build-benchmarks --skip-early-swift-driver \
-    --skip-ios --skip-tvos --skip-watchos --skip-xros \
     --skip-build-clang-tools-extra \
     --build-lld \
-    --llvm-targets-to-build "AArch64;ARM;X86;Z80" \
-    --swift-darwin-supported-archs arm64 \
+    "${host_args[@]}" \
     --extra-swift-cmake-options="-DSWIFT_EMBEDDED_STDLIB_EXTRA_TARGET_TRIPLES=sm83-none-none-elf" \
     --extra-swift-cmake-options="-DSWIFT_EMBEDDED_STDLIB_BUILD_EXTRA_TARGET_TRIPLES_ONLY=ON" \
     --skip-test-swift --skip-test-cmark --skip-test-early-swift-driver --skip-test-swift-driver \
@@ -85,10 +95,10 @@ build() {
 
 build_driver() {
   # swift-driver is a SwiftPM package, so build it with the host Swift (dependencies are fetched from GitHub)
-  local scratch="$BUILD_ROOT/sm83/swift-driver-macosx-arm64"
+  local scratch="$BUILD_ROOT/sm83/swift-driver-$HOST_SUFFIX"
   # --product only honors the last one, so invoke once per product
   for prod in swift-driver swift-help; do
-    (cd "$SRC/swift-driver" && xcrun swift build -c release --scratch-path "$scratch" --product "$prod")
+    (cd "$SRC/swift-driver" && $HOST_SWIFT build -c release --scratch-path "$scratch" --product "$prod")
   done
 }
 

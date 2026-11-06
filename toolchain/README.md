@@ -14,6 +14,8 @@ tag `llvmz80-23.1.3-r1`.
 | `make-swift-sdk.sh` | Generates `build/gameboy.artifactbundle` and runs `swift sdk install`. The toolset.json contains absolute paths, so re-run it after moving the toolchain |
 | `export-patches.sh` | Writes the working-tree changes under `build/src/` out to `patches/*.patch` |
 | `patches/` | SM83 patches for llvm-project, swift and swift-driver |
+| `package-sdk.sh` | Distribution: `toolchain --host <triple>` collects and strips the files the SDK needs into `dist/toolchain-<triple>.tar.gz`; `bundle --version <v> <tarballs>` assembles them into `dist/swift-gameboy-<v>.artifactbundle.tar.gz` (one variant per host, relative paths) plus a `.sha256` for `swift sdk install --checksum` |
+| `host.sh`, `sdk-json.sh` | Shared helpers: host detection (macOS / Linux build directory names) and the swift-sdk.json / toolset.json contents |
 
 ```
 toolchain/build.sh                 # first build; also invoked by setup.sh
@@ -24,8 +26,24 @@ toolchain/export-patches.sh        # export build/src changes to the patches
 tools/test.sh                      # regression tests
 ```
 
+On Linux the same scripts run inside the `swift:6.4.2-jammy` container (see `.github/workflows/toolchain.yml` for the
+package list); build directories are named `build/sm83/{llvm,swift}-linux-<arch>` and the bundle variant additionally
+contains `usr/lib/swift/linux` (the host standard library that swift-frontend loads through its rpath).
+
 To rebuild just the compiler quickly, use `ninja -C build/sm83/swift-macosx-arm64 swift-frontend` or
 `ninja -C build/sm83/llvm-macosx-arm64 clang lld`, then run `install-toolchain.sh`.
+
+## Releases (GitHub Actions)
+
+`.github/workflows/toolchain.yml` builds the toolchain on macOS arm64, Linux x86_64 and Linux aarch64, packages each
+with `package-sdk.sh toolchain`, assembles a single bundle with `package-sdk.sh bundle`, and on a version tag (`0.1.0` style, like Swift's own tags) creates a
+GitHub release with the tarball, its SHA-256 and the `swift sdk install ... --checksum ...` command. `workflow_dispatch`
+runs produce the bundle as a workflow artifact only. The build uses sccache backed by the Actions cache because
+GitHub-hosted runners (3-4 vCPUs, 6 hour limit) are slower than the 1.5-3 hours measured on a 10-core machine; if a
+host keeps timing out, move that job to a self-hosted runner. `.github/workflows/ci.yml` checks syntax on every push
+and, once a release exists, builds the samples with the latest released SDK and runs `tools/test.sh`.
+
+A tagged release is made with `git tag 0.1.0 && git push origin 0.1.0`.
 
 ## How it works
 

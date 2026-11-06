@@ -1,0 +1,135 @@
+# Builds the SM83 Swift toolchain on every supported host, assembles one Swift SDK bundle with a variant per host,
+# and attaches it to a GitHub release when a version tag (e.g. 0.1.0) is pushed.
+#
+# The toolchain build takes 1.5-3 hours on a 10-core machine. GitHub-hosted runners have 3-4 vCPUs and a 6 hour job
+# limit, so the build uses sccache backed by the Actions cache: the first run on a given host may time out, the next
+# one picks up where it left off. If that is not enough, run the macOS job on a self-hosted runner.
+name: Toolchain
+
+on:
+  push:
+    tags: ['[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Bundle version (defaults to the tag name, or 0.0.0-<sha> for manual runs)'
+        required: false
+
+concurrency:
+  group: toolchain-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build (${{ matrix.host }})
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            host: arm64-apple-macosx
+          - os: ubuntu-24.04
+            host: x86_64-unknown-linux-gnu
+            container: swift:6.4.2-jammy
+          - os: ubuntu-24.04-arm
+            host: aarch64-unknown-linux-gnu
+            container: swift:6.4.2-jammy
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential git ninja-build pkg-config rsync swig uuid-dev zip \
+            libedit-dev libncurses5-dev libsqlite3-dev libxml2-dev libcurl4-openssl-dev libpython3-dev \
+            python3 python3-pip python3-setuptools python3-six python3-psutil binutils
+          # Ubuntu 22.04's cmake is too old for Swift; take a recent one from PyPI
+          pip3 install --break-system-packages 'cmake>=3.30' 2>/dev/null || pip3 install 'cmake>=3.30'
+          cmake --version | head -1
+
+      - name: Install build dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install ninja cmake
+          sudo xcode-select -s /Applications/Xcode_27.app/Contents/Developer 2>/dev/null || true
+          xcodebuild -version
+          swift --version
+
+      - name: Free disk space (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+          df -h .
+
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Build the toolchain
+        env:
+          SWIFT_USE_SCCACHE: '1'
+          SCCACHE_GHA_ENABLED: 'true'
+        run: |
+          df -h .
+          toolchain/build.sh
+          sccache --show-stats
+          df -h .
+
+      - name: Package the toolchain
+        run: toolchain/package-sdk.sh toolchain --host ${{ matrix.host }} --out dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: toolchain-${{ matrix.host }}
+          path: dist/toolchain-${{ matrix.host }}.tar.gz
+          retention-days: 7
+          compression-level: 0
+
+  bundle:
+    name: Bundle and release
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: toolchain-*
+          path: dist
+          merge-multiple: true
+      - name: Determine the version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then v="${{ inputs.version }}"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then v="${GITHUB_REF#refs/tags/}"
+          else v="0.0.0-${GITHUB_SHA::8}"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Assemble the Swift SDK bundle
+        run: |
+          ls -la dist
+          toolchain/package-sdk.sh bundle --version "${{ steps.version.outputs.version }}" --out dist dist/toolchain-*.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: swift-gameboy-sdk
+          path: |
+            dist/swift-gameboy-*.artifactbundle.tar.gz
+            dist/swift-gameboy-*.artifactbundle.tar.gz.sha256
+          compression-level: 0
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sum=$(cat dist/swift-gameboy-*.artifactbundle.tar.gz.sha256)
+          file=$(ls dist/swift-gameboy-*.artifactbundle.tar.gz)
+          notes="Install with:
+
+              swift sdk install https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/$(basename "$file") --checksum $sum
+
+          Then build a package with \`swift package --swift-sdk gameboy --build-system native gb-rom -c release\`."
+          gh release create "$GITHUB_REF_NAME" "$file" "$file.sha256" --title "swift-gameboy ${GITHUB_REF_NAME}" --notes "$notes"
