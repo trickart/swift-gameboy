@@ -21,12 +21,24 @@ while true { Display.waitVBlank() }
 
 ## Requirements
 
-- macOS (Apple Silicon), Xcode 27 (Swift 6.4)
-- The Swift SDK `gameboy`. `./setup.sh` builds the toolchain from source and installs the SDK (first time only,
-  1.5–3 hours, needs CMake and Ninja). If you already have a built toolchain, run `SWIFT_GB_TOOLCHAIN=<path> ./setup.sh`.
-  See [toolchain/README.md](toolchain/README.md) for details.
+- Swift 6.4 on macOS (Apple Silicon, Xcode 27) or Linux (x86_64 / aarch64, e.g. the `swift:6.4.2` Docker image)
+- The Swift SDK `gameboy` (see below)
 
 ## Usage
+
+Install the prebuilt Swift SDK from the [Releases](https://github.com/trickart/swift-gameboy/releases) page. Each
+release contains one bundle for all supported hosts; SwiftPM picks the right toolchain for your machine:
+
+```sh
+swift sdk install https://github.com/trickart/swift-gameboy/releases/download/0.0.1/swift-gameboy-0.0.1.artifactbundle.tar.gz \
+  --checksum 40d78a8a14d16f2ef5de47c825d80c199622dd1d606c00067b5fa699d5fe087d
+swift sdk list   # → gameboy
+```
+
+The checksum of each release is in its `.sha256` file and release notes. To build the toolchain from source
+instead, run `./setup.sh` (1.5–3 hours; see [toolchain/README.md](toolchain/README.md)).
+
+Then add the `GameBoy` library to your package:
 
 ```swift
 // swift-tools-version:5.9
