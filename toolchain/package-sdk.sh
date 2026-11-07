@@ -77,13 +77,15 @@ cmd_toolchain() {
   # Linux: the executables find their shared libraries via rpath ($ORIGIN/../lib/swift/linux etc.), so everything
   # they need must be inside the package. Fail early if something is missing instead of shipping a broken bundle.
   if [ "$(uname -s)" = "Linux" ] && command -v ldd > /dev/null; then
-    local missing=""
+    local missing="" unresolved
     for f in "$usr"/bin/swift-frontend "$usr"/bin/swift-driver "$usr"/bin/clang-21 "$usr"/bin/lld "$usr"/lib/swift/linux/*.so; do
       [ -f "$f" ] || continue
-      missing="$missing$(ldd "$f" 2>/dev/null | grep 'not found' | sed "s|^|  $(basename "$f"):|")"
+      # grep exits 1 when nothing is missing, which is the good case; keep set -e/pipefail from tripping on it
+      unresolved=$(ldd "$f" 2>/dev/null | grep 'not found' || true)
+      [ -z "$unresolved" ] || missing="$missing
+$(echo "$unresolved" | sed "s|^|  $(basename "$f"):|")"
     done
-    [ -z "$missing" ] || die "shared libraries missing from the package:
-$missing"
+    [ -z "$missing" ] || die "shared libraries missing from the package:$missing"
   fi
   cp "$tc/Info.plist" "$work/toolchain/" 2>/dev/null || true
 
