@@ -18,9 +18,11 @@ for c in clang clang-resource-headers lld llvm-mc llvm-objcopy llvm-nm llvm-ar l
     || echo "warning: failed to install LLVM component $c"
 done
 
-# Swift: compiler and standard library (including Embedded sm83)
-for c in compiler compiler-swift-syntax-lib swift-syntax-lib clang-builtin-headers autolink-driver \
-         libexec stdlib license; do
+# Swift: compiler and standard library (including Embedded sm83). On Linux the host stdlib also needs the
+# Glibc overlay (libswiftGlibc.so, component sdk-overlay); macOS uses the system Swift runtime instead.
+SWIFT_COMPONENTS="compiler compiler-swift-syntax-lib swift-syntax-lib clang-builtin-headers autolink-driver libexec stdlib license"
+[ "$HOST_OS" = "Darwin" ] || SWIFT_COMPONENTS="$SWIFT_COMPONENTS sdk-overlay"
+for c in $SWIFT_COMPONENTS; do
   cmake --install "$BUILD/swift-$HOST_SUFFIX" --component "$c" --prefix "$PREFIX" > /dev/null \
     || echo "warning: failed to install Swift component $c"
 done
