@@ -10,9 +10,9 @@ swift sdk list 2>/dev/null | grep -qx gameboy || { echo "error: Swift SDK gamebo
 # Suppress the warnings SwiftPM emits when it loads libSwiftScan from both Xcode and our toolchain (objc[...] / incompatible libSwiftScan)
 export SWIFT_DRIVER_SWIFTSCAN_LIB="$(xcrun --find swiftc | xargs dirname)/../lib/swift/host/lib_InternalSwiftScan.dylib"
 
-build() {  # build <package directory> -> prints the ROM path
-  local dir=$1 name; name=$(basename "$dir")
-  (cd "$dir" && swift package --swift-sdk gameboy --build-system native gb-rom -c release 2>&1 \
+build() {  # build <package directory> [gb-rom options] -> prints the ROM path
+  local dir=$1; shift
+  (cd "$dir" && swift package --swift-sdk gameboy --build-system native gb-rom -c release "$@" 2>&1 \
      | grep -v "^warning: '--build-system\|^objc\[" | grep "ROM\|error" || true)
 }
 
@@ -34,6 +34,11 @@ check hello "$ROOT/examples/hello/.build/plugins/GBRom/outputs/hello.gb" 130 "Su
 echo "== examples/sprite"
 build "$ROOT/examples/sprite"
 check sprite "$ROOT/examples/sprite/.build/plugins/GBRom/outputs/sprite.gb" 100 "beeps: 2" --press "10:RIGHT,40:A,42:,50:A,52:"
+
+echo "== examples/puzzle"
+build "$ROOT/examples/puzzle" --color
+# After the shuffle at least one of UP / DOWN can slide a piece
+check puzzle "$ROOT/examples/puzzle/.build/plugins/GBRom/outputs/puzzle.gb" 400 "MOVES 1" --press "40:START,44:,300:UP,304:,310:DOWN,314:"
 
 echo "== tests/features (language features)"
 build "$ROOT/tests/features"

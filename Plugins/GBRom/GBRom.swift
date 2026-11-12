@@ -4,7 +4,7 @@
 //
 // Usage (from the package directory):
 //   swift package --swift-sdk gameboy --build-system native [-c release] gb-rom [--product NAME] [-c release|debug]
-//                                                                           [--output PATH] [--title TITLE] [--verbose]
+//                                                                           [--output PATH] [--title TITLE] [--color] [--verbose]
 // The build configuration is taken from the -c after gb-rom, or else from swift package's -c (default debug).
 // The default output is .build/plugins/GBRom/outputs/<product>.gb (a location the sandbox allows writing to).
 // To write elsewhere inside the package with --output, pass --allow-writing-to-package-directory to swift package.
@@ -34,6 +34,7 @@ struct GBRom: CommandPlugin {
         let configuration = ex.extractOption(named: "configuration").last ?? "inherit"
         let output = ex.extractOption(named: "output").last
         let title = ex.extractOption(named: "title").last
+        let color = ex.extractFlag(named: "color") > 0
         let verbose = ex.extractFlag(named: "verbose") > 0
         guard ex.remainingArguments.isEmpty else {
             throw GBRomError("Unknown argument(s): \(ex.remainingArguments.joined(separator: " "))\n\(usage)")
@@ -79,7 +80,7 @@ struct GBRom: CommandPlugin {
             // 2. ELF -> ROM
             let image = try ROMImage(elf: Data(contentsOf: elf))
             let romTitle = title ?? product.name
-            let rom = image.finalizedROM(title: romTitle)
+            let rom = image.finalizedROM(title: romTitle, color: color)
 
             // 3. Write out
             let outURL: URL
@@ -158,10 +159,12 @@ struct ROMImage {
     }
 
     /// Same fix-up as gbfix.py: pad to 32KB with 0xFF, set title, ROM size, and header/global checksums.
-    func finalizedROM(title: String) -> Data {
+    /// `color` sets the CGB flag to 0x80: the ROM runs in color mode on a Game Boy Color and still works on the original Game Boy.
+    func finalizedROM(title: String, color: Bool = false) -> Data {
         var rom = bytes + [UInt8](repeating: 0xFF, count: romSize - bytes.count)
         let t = Array(ROMImage.headerTitle(title).utf8)
         rom.replaceSubrange(0x134..<0x143, with: t + [UInt8](repeating: 0, count: 15 - t.count))
+        rom[0x143] = color ? 0x80 : 0x00
         rom[0x148] = 0x00
         var x: UInt8 = 0
         for i in 0x134..<0x14D { x = x &- rom[i] &- 1 }
@@ -190,5 +193,6 @@ let usage = """
       -o, --output <path>           Output path (default: .build/plugins/GBRom/outputs/<product>.gb). Writing elsewhere
                                     inside the package requires --allow-writing-to-package-directory on swift package
       --title <string>              Cartridge header title (default: product name; uppercase, up to 15 characters)
+      --color                       Mark the ROM as Game Boy Color enhanced (it still runs on the original Game Boy)
       -v, --verbose                 Show the build log
     """

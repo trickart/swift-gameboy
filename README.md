@@ -62,11 +62,11 @@ python3 tools/sm83emu.py .build/plugins/GBRom/outputs/mygame.gb --ascii   # bund
 ```
 
 `--build-system native` is required (the default build system does not support bare-metal linking yet).
-`gb-rom` accepts `-c release|debug`, `--product <name>`, `--title <string>` and `-o <path>` (writing inside the
+`gb-rom` accepts `-c release|debug`, `--product <name>`, `--title <string>`, `--color` and `-o <path>` (writing inside the
 package directory needs `--allow-writing-to-package-directory`). The `objc[...]` and `libSwiftScan` warnings
 printed during the build are harmless.
 The resulting ROM is 32KB with no MBC and runs on real hardware and in emulators (SameBoy, mGBA, BGB).
-See `examples/hello` and `examples/sprite` for sample programs.
+See `examples/hello`, `examples/sprite` and `examples/puzzle` (a sliding puzzle) for sample programs.
 
 ## The GameBoy module
 
@@ -77,6 +77,7 @@ See `examples/hello` and `examples/sprite` for sample programs.
 | `Console` | 20×18 character text console; `print` writes here |
 | `Serial` | Serial port output (`print` goes to both the screen and the serial port) |
 | `Joypad` | `poll()`, then `held` / `pressed` / `released` |
+| `Color` | Game Boy Color palettes: `Display.setBackgroundColors([...])` / `setSpriteColors` with `Color(rgb: 0xF05138)`; build with `gb-rom --color` |
 | `Sprites` | Shadow OAM: `set(_:x:y:tile:attributes:)`, `hide`, `flush()` during VBlank |
 | `Interrupts` | `enable([.vblank])`; handlers are defined as `@_cdecl("gb_vblank_handler") func ...()` |
 | `Sound` / `Random` / `Font` / `Memory.heapFree` | Beep, 16-bit xorshift, 5×7 font, free heap |
@@ -97,7 +98,7 @@ Sources/GameBoy/   GameBoy module                 Plugins/GBRom/   gb-rom plugin
 examples/          sample programs                tests/features/  language feature test
 runtime/           crt0, linker script and C runtime (installed into the toolchain)
 toolchain/         toolchain build scripts, SM83 patches, Swift SDK generation
-tools/             emulator (sm83emu.py), regression tests (test.sh), font generator
+tools/             emulator (sm83emu.py), regression tests (test.sh), font and picture generators
 ```
 
 ## License

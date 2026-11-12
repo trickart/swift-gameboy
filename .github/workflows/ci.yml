@@ -20,11 +20,13 @@ jobs:
       - name: Swift sources parse
         run: |
           swift --version
-          for f in Package.swift Plugins/GBRom/GBRom.swift Sources/GameBoy/*.swift examples/*/main.swift tests/features/main.swift; do
+          for f in Package.swift Plugins/GBRom/GBRom.swift Sources/GameBoy/*.swift examples/*/*.swift tests/features/main.swift; do
             xcrun swiftc -parse "$f"
           done
       - name: Font.swift is up to date
         run: python3 tools/genfont.py /tmp/Font.swift && diff /tmp/Font.swift Sources/GameBoy/Font.swift
+      - name: Logo.swift is up to date
+        run: python3 tools/genlogo.py /tmp/Logo.swift && diff /tmp/Logo.swift examples/puzzle/Logo.swift
 
   test:
     name: Build samples with the released SDK

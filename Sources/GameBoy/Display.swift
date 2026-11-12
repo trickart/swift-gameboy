@@ -77,6 +77,10 @@ public enum Display {
     gb_vram_copy_1bpp(HW.tileData + index * 16, src, UInt16(truncatingIfNeeded: data.count))
   }
 
+  public static func loadTiles1bpp(_ data: [UInt8], startingAt index: Int) {
+    data.withUnsafeBufferPointer { loadTiles1bpp($0, startingAt: index) }
+  }
+
   /// Fills tiles with zero
   public static func clearTiles(from index: Int, count: Int) {
     gb_vram_fill(HW.tileData + index * 16, 0, UInt16(truncatingIfNeeded: count * 16))

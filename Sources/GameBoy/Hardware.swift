@@ -36,6 +36,12 @@ public enum HW {
   public static var wy: UInt8 { get { read(0xFF4A) } set { write(0xFF4A, newValue) } }
   public static var wx: UInt8 { get { read(0xFF4B) } set { write(0xFF4B, newValue) } }
 
+  // --- Game Boy Color palettes ---
+  public static var bcps: UInt8 { get { read(0xFF68) } set { write(0xFF68, newValue) } }
+  public static var bcpd: UInt8 { get { read(0xFF69) } set { write(0xFF69, newValue) } }
+  public static var ocps: UInt8 { get { read(0xFF6A) } set { write(0xFF6A, newValue) } }
+  public static var ocpd: UInt8 { get { read(0xFF6B) } set { write(0xFF6B, newValue) } }
+
   // --- Sound (bare minimum) ---
   public static var nr10: UInt8 { get { read(0xFF10) } set { write(0xFF10, newValue) } }
   public static var nr11: UInt8 { get { read(0xFF11) } set { write(0xFF11, newValue) } }

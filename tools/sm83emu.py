@@ -3,6 +3,7 @@
 
 - Full SM83 CPU instruction set, interrupts, timer, serial port (output is captured), OAM DMA
 - The PPU renders BG / window / sprites per scanline (timing is simplified)
+- Game Boy Color: only the color palettes (for ROMs with the CGB flag; tile attributes always use palette 0 / bank 0)
 - Writes the screen as PNG / ASCII art after running the requested number of frames
 - `--press` feeds button input at the given frames
 - Detects the infinite loop at an RST vector (a Swift trap) and stops
@@ -67,6 +68,13 @@ class GameBoy:
         self.mode = 2
         self.dropped_vram_writes = 0   # number of VRAM/OAM writes dropped during mode 3 (mode 2/3 for OAM) while the LCD was on
         self.fb = bytearray(160 * 144)
+        # Game Boy Color palettes (ROMs with the CGB flag): 8 BG palettes followed by 8 sprite palettes,
+        # 4 colors x 2 bytes each. fb_pal holds the palette-memory offset of every pixel
+        self.cgb = bool(self.rom[0x143] & 0x80)
+        self.cgb_pal = bytearray(b'\xff\x7f' * 32 + bytes(64))
+        self.fb_pal = bytearray(160 * 144)
+        if self.cgb:
+            self.a = 0x11
         self.serial_log = bytearray()
         self.buttons = 0  # bit set of currently pressed buttons (see BUTTONS)
         self.trap_pc = None
@@ -128,6 +136,12 @@ class GameBoy:
             return
         if addr == 0xFF04:
             self.div_counter = 0; self.mem[addr] = 0; return
+        if addr in (0xFF69, 0xFF6B) and self.cgb:
+            spec = self.mem[addr - 1]
+            self.cgb_pal[(64 if addr == 0xFF6B else 0) + (spec & 0x3F)] = val
+            if spec & 0x80:  # auto-increment
+                self.mem[addr - 1] = 0x80 | ((spec + 1) & 0x3F)
+            return
         if addr == 0xFF44:
             return
         if addr == 0xFF46:
@@ -482,6 +496,7 @@ class GameBoy:
         lcdc = mem[0xFF40]
         bgp = mem[0xFF47]
         row = self.fb
+        pal_row = self.fb_pal
         base = y * 160
         bg_color = [0] * 160  # color indices before palette mapping (used for sprite priority)
         if lcdc & 0x01:
@@ -501,6 +516,7 @@ class GameBoy:
                 ci = ((hi >> bit) & 1) << 1 | ((lo >> bit) & 1)
                 bg_color[x] = ci
                 row[base + x] = (bgp >> (ci * 2)) & 3
+                pal_row[base + x] = ci * 2
             # Window
             if lcdc & 0x20:
                 wy, wx = mem[0xFF4A], mem[0xFF4B] - 7
@@ -518,9 +534,10 @@ class GameBoy:
                         ci = ((hi >> bit) & 1) << 1 | ((lo >> bit) & 1)
                         bg_color[x] = ci
                         row[base + x] = (bgp >> (ci * 2)) & 3
+                        pal_row[base + x] = ci * 2
                     self.window_line += 1
         else:
-            for x in range(160): row[base + x] = 0
+            for x in range(160): row[base + x] = 0; pal_row[base + x] = 0
         # Sprites
         if lcdc & 0x02:
             height = 16 if lcdc & 0x04 else 8
@@ -549,6 +566,7 @@ class GameBoy:
                     if ci == 0: continue
                     if attr & 0x80 and bg_color[x] != 0: continue
                     row[base + x] = (pal >> (ci * 2)) & 3
+                    pal_row[base + x] = 64 + (attr & 7) * 8 + ci * 2
 
     # -------------------------------------------------------------- run
     def run_frames(self, n, trap_check=True, press=None):
@@ -594,6 +612,13 @@ class GameBoy:
             lines.append(line)
         return '\n'.join(lines)
 
+    def pixel_rgb(self, i):
+        if not self.cgb:
+            return PALETTE[self.fb[i]]
+        o = self.fb_pal[i]
+        c = self.cgb_pal[o] | self.cgb_pal[o + 1] << 8
+        return tuple((v << 3 | v >> 2) for v in (c & 31, (c >> 5) & 31, (c >> 10) & 31))
+
     def png(self, scale=2):
         w, h = 160 * scale, 144 * scale
         raw = bytearray()
@@ -601,7 +626,7 @@ class GameBoy:
             raw.append(0)
             srow = (y // scale) * 160
             for x in range(w):
-                raw += bytes(PALETTE[self.fb[srow + x // scale]])
+                raw += bytes(self.pixel_rgb(srow + x // scale))
 
         def chunk(t, d):
             c = struct.pack('>I', len(d)) + t + d
